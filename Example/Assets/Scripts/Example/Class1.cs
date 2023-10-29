@@ -23,8 +23,6 @@ namespace SQLite4Unity3d.Example
         public float[] Floats2 { get; set; }
         [ToString]
         public int[] Ints2 { get; set; }
-        [ToString]
-        public bool[] Boolean2 { get; set; }
         // class or struct to string
         [ToString]
         public Class2 Class2 { get; set; }

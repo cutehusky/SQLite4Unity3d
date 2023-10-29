@@ -18,7 +18,6 @@ namespace SQLite4Unity3d
 			var class1Test = new Class1
 			{
 				Boolean1 = new[] { true, true, false, true },
-				Boolean2 = new[] { false, true, false, false },
 				String1 = "hello",
 				Strings1 = new[] { "hello", "world", "123" },
 				Float1 = -9.81f,
@@ -38,8 +37,6 @@ namespace SQLite4Unity3d
 			{
 				Debug.Log(o.Id);
 				foreach (var v in o.Boolean1)
-					Debug.Log(v);
-				foreach (var v in o.Boolean2)
 					Debug.Log(v);
 				Debug.Log(o.String1);
 				foreach (var v in o.Strings1)

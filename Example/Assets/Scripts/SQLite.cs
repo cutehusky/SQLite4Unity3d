@@ -22,6 +22,9 @@
 #if WINDOWS_PHONE && !USE_WP8_NATIVE_SQLITE
 #define USE_CSHARP_SQLITE
 #endif
+#if UNITY_5_3_OR_NEWER
+using UnityEngine;
+#endif
 
 using System;
 using System.Diagnostics;
@@ -31,6 +34,7 @@ using System.Reflection;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
+using Random = System.Random;
 
 #if USE_CSHARP_SQLITE
 using Sqlite3 = Community.CsharpSqlite.Sqlite3;
@@ -1620,6 +1624,11 @@ namespace SQLite4Unity3d
 	}
 
 	[AttributeUsage (AttributeTargets.Property)]
+	public class ToStringAttribute : Attribute
+	{
+	}
+	
+	[AttributeUsage (AttributeTargets.Property)]
 	public class PrimaryKeyAttribute : Attribute
 	{
 	}
@@ -1874,6 +1883,8 @@ namespace SQLite4Unity3d
 
 			public bool IsPK { get; private set; }
 
+			public bool IsToString { get; private set; }
+
 			public IEnumerable<IndexedAttribute> Indices { get; set; }
 
 			public bool IsNullable { get; private set; }
@@ -1893,7 +1904,7 @@ namespace SQLite4Unity3d
 				IsPK = Orm.IsPK(prop) ||
 					(((createFlags & CreateFlags.ImplicitPK) == CreateFlags.ImplicitPK) &&
 						string.Compare (prop.Name, Orm.ImplicitPkName, StringComparison.OrdinalIgnoreCase) == 0);
-
+				IsToString = Orm.IsToString(prop) && !ColumnType.IsPrimitive && ColumnType != typeof(string) && ColumnType != typeof(decimal);
 				var isAuto = Orm.IsAutoInc(prop) || (IsPK && ((createFlags & CreateFlags.AutoIncPK) == CreateFlags.AutoIncPK));
 				IsAutoGuid = isAuto && ColumnType == typeof(Guid);
 				IsAutoInc = isAuto && !IsAutoGuid;
@@ -1911,14 +1922,62 @@ namespace SQLite4Unity3d
 				MaxStringLength = Orm.MaxStringLength(prop);
 			}
 
-			public void SetValue (object obj, object val)
+			public void SetValue(object obj, object val)
 			{
-				_prop.SetValue (obj, val, null);
+				var newVal = (IsToString && val != null)
+					? (ColumnType.IsArray
+						? String2Array((string)val, ColumnType)
+						: Activator.CreateInstance(ColumnType, (string)val))
+					: val;
+				_prop.SetValue(obj, newVal, null);
 			}
 
-			public object GetValue (object obj)
+			public object GetValue(object obj)
 			{
-				return _prop.GetGetMethod().Invoke(obj, null);
+				var val = _prop.GetGetMethod().Invoke(obj, null);
+				return (IsToString && val != null)
+					? (ColumnType.IsArray
+						? Array2String(val, ColumnType)
+						: val.ToString())
+					: val;
+			}
+
+			public static Dictionary<Type, Func<object, string>> ReadArrayFunction = new ()
+			{
+				[typeof(bool[])] = (arr) => { return string.Join(",", Array.ConvertAll((bool[])arr, x => x.ToString()));},
+				[typeof(short[])] = (arr) => { return string.Join(",", Array.ConvertAll((short[])arr, x => x.ToString()));},
+				[typeof(int[])] = (arr) => { return string.Join(",", Array.ConvertAll((int[])arr, x => x.ToString()));},
+				[typeof(float[])] = (arr) => { return string.Join(",", Array.ConvertAll((float[])arr, x => x.ToString()));},
+				[typeof(double[])] = (arr) => { return string.Join(",", Array.ConvertAll((double[])arr, x => x.ToString()));},
+				[typeof(long[])] = (arr) => { return string.Join(",", Array.ConvertAll((long[])arr, x => x.ToString()));},
+				[typeof(string[])] = (arr) => string.Join(",", (string[]) arr)
+			};
+			
+			public static Dictionary<Type, Func<string, object>> WriteArrayFunction = new ()
+			{
+				[typeof(bool)] = (str) => str.Split(',')?.Select(bool.Parse).ToArray(),
+				[typeof(short)] = (str) => str.Split(',')?.Select(short.Parse).ToArray(),
+				[typeof(int)] = (str) => str.Split(',')?.Select(int.Parse).ToArray(),
+				[typeof(float)] = (str) => str.Split(',')?.Select(float.Parse).ToArray(),
+				[typeof(double)] = (str) => str.Split(',')?.Select(double.Parse).ToArray(),
+				[typeof(long)] = (str) => str.Split(',')?.Select(long.Parse).ToArray(),
+				[typeof(string)] = (str) => str.Split(',')
+			};
+
+			private static string Array2String(object arr, Type T)
+			{
+				if (ReadArrayFunction.TryGetValue(T, out var func))
+					return func(arr);
+				throw new NotSupportedException ("Cannot store type: " + T);
+			}
+			private static object String2Array(string str, Type T)
+			{
+				if (str.Length == 0) 
+					return null;
+				var t = T.GetElementType();
+				if (WriteArrayFunction.TryGetValue(t, out var func))
+					return func(str);
+				throw new NotSupportedException ("Don't know how to read: " + T);
 			}
 		}
 	}
@@ -1951,6 +2010,8 @@ namespace SQLite4Unity3d
 
 		public static string SqlType (TableMapping.Column p, bool storeDateTimeAsTicks)
 		{
+			if (p.IsToString)
+				return "varchar";
 			var clrType = p.ColumnType;
 			if (clrType == typeof(Boolean) || clrType == typeof(Byte) || clrType == typeof(UInt16) || clrType == typeof(SByte) || clrType == typeof(Int16) || clrType == typeof(Int32)) {
 				return "integer";
@@ -1977,13 +2038,27 @@ namespace SQLite4Unity3d
 			} else if (clrType.GetTypeInfo().IsEnum) {
 #endif
 				return "integer";
-			} else if (clrType == typeof(byte[])) {
+			} else if (clrType == typeof(byte[]) || clrType == typeof(double[]) ||clrType == typeof(int[])
+			                                     || clrType == typeof(float[]) || clrType == typeof(long[])
+			                                     || clrType == typeof(bool[]) || clrType == typeof(short[])
+			                                     || clrType == typeof(Vector3[]) || clrType == typeof(Vector4[])
+			                                     || clrType == typeof(Vector2[])) {
 				return "blob";
 			} else if (clrType == typeof(Guid)) {
 				return "varchar(36)";
 			} else {
 				throw new NotSupportedException ("Don't know about " + clrType);
 			}
+		}
+		
+		public static bool IsToString (MemberInfo p)
+		{
+			var attrs = p.GetCustomAttributes (typeof(ToStringAttribute), true);
+#if !NETFX_CORE
+			return attrs.Length > 0;
+#else
+			return attrs.Count() > 0;
+#endif
 		}
 
 		public static bool IsPK (MemberInfo p)
@@ -2148,7 +2223,7 @@ namespace SQLite4Unity3d
 							if (cols [i] == null)
 								continue;
 							var colType = SQLite3.ColumnType (stmt, i);
-							var val = ReadCol (stmt, i, colType, cols [i].ColumnType);
+							var val = ReadCol (stmt, i, colType, cols [i].ColumnType, cols[i].IsToString);
 							cols [i].SetValue (obj, val);
 						}
 						OnInstanceCreated (obj);
@@ -2278,8 +2353,73 @@ namespace SQLite4Unity3d
 				} else if (value.GetType().GetTypeInfo().IsEnum) {
 #endif
 					SQLite3.BindInt (stmt, index, Convert.ToInt32 (value));
-				} else if (value is byte[]){
-					SQLite3.BindBlob(stmt, index, (byte[]) value, ((byte[]) value).Length, NegativePointer);
+				} else if (value is byte[]) {
+					SQLite3.BindBlob(stmt, index, (byte[])value, ((byte[])value).Length, NegativePointer);
+				} else if (value is float[]) {
+					var newValue = ToByteArray((float[])value, sizeof (float));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is int[]) {
+					var newValue = ToByteArray((int[])value, sizeof (int));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is short[]) {
+					var newValue = ToByteArray((short[])value, sizeof (short));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is bool[]) {
+					var newValue = ToByteArray((bool[])value, sizeof (bool));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is double[]) {
+					var newValue = ToByteArray((double[])value, sizeof (double));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is long[]) {
+					var newValue = ToByteArray((long[])value, sizeof (long));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+#if UNITY_5_3_OR_NEWER
+				} else if (value is Vector2[]) {
+					var vec2 = (Vector2[])value;
+					var floatArr = new float[vec2.Length * 2];
+					for (int i = 0; i < vec2.Length; i++)
+					{
+						floatArr[i * 2] = vec2[i].x;
+						floatArr[i * 2 + 1] = vec2[i].y;
+					}
+					var newValue = ToByteArray(floatArr, sizeof(float));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is Vector3[]) {
+					var vec3 = (Vector3[])value;
+					var floatArr = new float[vec3.Length * 3];
+					for (int i = 0; i < vec3.Length; i++)
+					{
+						floatArr[i * 3] = vec3[i].x;
+						floatArr[i * 3 + 1] = vec3[i].y;
+						floatArr[i * 3 + 2] = vec3[i].z;
+					}
+					var newValue = ToByteArray(floatArr, sizeof(float));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is Vector4[]) {
+					var vec4 = (Vector4[])value;
+					var floatArr = new float[vec4.Length * 4];
+					for (int i = 0; i < vec4.Length; i++)
+					{
+						floatArr[i * 4] = vec4[i].x;
+						floatArr[i * 4 + 1] = vec4[i].y;
+						floatArr[i * 4 + 2] = vec4[i].z;
+						floatArr[i * 4 + 3] = vec4[i].w;
+					}
+					var newValue = ToByteArray(floatArr, sizeof(float));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is Vector2) {
+					var vec2 = (Vector2)value;
+					var newValue = ToByteArray(new [] { vec2.x, vec2.y }, sizeof(float));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is Vector3) {
+					var vec3 = (Vector3)value;
+					var newValue = ToByteArray(new [] { vec3.x, vec3.y, vec3.z }, sizeof(float));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+				} else if (value is Vector4) {
+					var vec4 = (Vector4)value;
+					var newValue = ToByteArray(new float[] { vec4.x, vec4.y,vec4.z, vec4.w  }, sizeof(float));
+					SQLite3.BindBlob(stmt, index, newValue, newValue.Length, NegativePointer);
+#endif
 				} else if (value is Guid) {
 					SQLite3.BindText(stmt, index, ((Guid)value).ToString(), 72, NegativePointer);
 				} else {
@@ -2287,6 +2427,15 @@ namespace SQLite4Unity3d
 				}
 			}
 		}
+
+		private static byte[] ToByteArray<T>(T[] value, int size)
+		{
+			if (value == null)
+				return Array.Empty<byte>();
+			var newValue = new byte[value.Length * size];
+			Buffer.BlockCopy(value, 0, newValue, 0, newValue.Length);
+			return newValue;
+		} 
 
 		class Binding
 		{
@@ -2297,11 +2446,13 @@ namespace SQLite4Unity3d
 			public int Index { get; set; }
 		}
 
-		object ReadCol (Sqlite3Statement stmt, int index, SQLite3.ColType type, Type clrType)
+		object ReadCol (Sqlite3Statement stmt, int index, SQLite3.ColType type, Type clrType, bool isToString = false)
 		{
 			if (type == SQLite3.ColType.Null) {
 				return null;
 			} else {
+				if (isToString)
+					return SQLite3.ColumnString (stmt, index);
 				if (clrType == typeof(String)) {
 					return SQLite3.ColumnString (stmt, index);
 				} else if (clrType == typeof(Int32)) {
@@ -2346,7 +2497,72 @@ namespace SQLite4Unity3d
 					return (sbyte)SQLite3.ColumnInt (stmt, index);
 				} else if (clrType == typeof(byte[])) {
 					return SQLite3.ColumnByteArray (stmt, index);
-				} else if (clrType == typeof(Guid)) {
+				} else if (clrType == typeof(bool[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					return FromByteArray<bool>(byteArr, sizeof(bool));
+				} else if (clrType == typeof(short[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					return FromByteArray<short>(byteArr, sizeof(short));
+				} else if (clrType == typeof(float[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					return FromByteArray<float>(byteArr, sizeof(float));
+				}else if (clrType == typeof(double[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					return FromByteArray<double>(byteArr, sizeof(double));
+				}else if (clrType == typeof(long[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					return FromByteArray<long>(byteArr, sizeof(long));
+				}else if (clrType == typeof(int[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					return FromByteArray<int>(byteArr, sizeof(int));
+#if UNITY_5_3_OR_NEWER
+				}else if (clrType == typeof(Vector3[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					var floatArr = FromByteArray<float>(byteArr, sizeof(float));
+					var vec3 = new Vector3[floatArr.Length / 3];
+					for (int i = 0; i < vec3.Length; i++)
+					{
+						vec3[i].x = floatArr[i * 3];
+						vec3[i].y = floatArr[i * 3 + 1];
+						vec3[i].z = floatArr[i * 3 + 2];
+					}
+					return vec3;
+				}else if (clrType == typeof(Vector2[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					var floatArr = FromByteArray<float>(byteArr, sizeof(float));
+					var vec2 = new Vector2[floatArr.Length / 2];
+					for (int i = 0; i < vec2.Length; i++)
+					{
+						vec2[i].x = floatArr[i * 2];
+						vec2[i].y = floatArr[i * 2 + 1];
+					}
+					return vec2;
+				}else if (clrType == typeof(Vector4[])) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					var floatArr = FromByteArray<float>(byteArr, sizeof(float));
+					var vec4 = new Vector4[floatArr.Length / 4];
+					for (int i = 0; i < vec4.Length; i++)
+					{
+						vec4[i].x = floatArr[i * 4];
+						vec4[i].y = floatArr[i * 4 + 1];
+						vec4[i].z = floatArr[i * 4 + 2];
+						vec4[i].w = floatArr[i * 4 + 3];
+					}
+					return vec4;
+				}else if (clrType == typeof(Vector3)) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					var floatArr = FromByteArray<float>(byteArr, sizeof(float));
+					return new Vector3( floatArr[0], floatArr[1], floatArr[2]);
+				}else if (clrType == typeof(Vector2)) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					var floatArr = FromByteArray<float>(byteArr, sizeof(float));
+					return new Vector2( floatArr[0], floatArr[1]);
+				}else if (clrType == typeof(Vector4)) {
+					var byteArr = SQLite3.ColumnByteArray (stmt, index);
+					var floatArr = FromByteArray<float>(byteArr, sizeof(float));
+					return new Vector4( floatArr[0], floatArr[1], floatArr[2], floatArr[3]);
+#endif
+				}else if (clrType == typeof(Guid)) {
 				  var text = SQLite3.ColumnString(stmt, index);
 				  return new Guid(text);
 				} else{
@@ -2354,8 +2570,15 @@ namespace SQLite4Unity3d
 				}
 			}
 		}
+		
+		private static T[] FromByteArray<T>(byte[] value, int size)
+		{
+			var newValue = new T[value.Length / size];
+			Buffer.BlockCopy(value, 0, newValue, 0,value.Length);
+			return newValue;
+		}
 	}
-
+	
 	/// <summary>
 	/// Since the insert never changed, we only need to prepare once.
 	/// </summary>

@@ -19,13 +19,12 @@ It uses the great [sqlite-net](https://github.com/praeclarum/sqlite-net) library
 
 If you want to know more about why I created this plugin you can read more [here](http://www.codecoding.com/sqlite4unity3d-using-sqlite-net-library-and-unity3d-free-edition/).
 
-# The fast track
+# Start
 All you have to do to start using it in your project:
 
-1. [Download this zip](https://github.com/codecoding/SQLite4Unity3d/raw/master/SQLite4Unity3d.zip), extract its content and  **copy the resulting folder to your Assets/Plugins folder**. It contains the dlls that Unity3d will need to access sqlite.
-2. **Copy the SQLite.cs** file into your scripts folder.
-3. Don’t forget to **copy your SQLite database file in your Assets/StreamingAssets folder if you’re shipping one**.
-4. **You’re done!** Now you can get access to your database using sqlite-net.  ;P
+1. [Download this zip](https://github.com/cutehusky/SQLite4Unity3d/raw/master/SQLite4Unity3d.zip), extract its content and  **copy the resulting folder to your Assets/Plugins folder**. It contains the dlls and scripts that Unity3d will need to access sqlite.
+2. Don’t forget to **copy your SQLite database file in your Assets/StreamingAssets folder if you’re shipping one**.
+3. **You’re done!** Now you can get access to your database using sqlite-net.  ;P
 
 # Example
 If you want to try it I've uploaded a small example that you will be able to find in the "Example" folder. Download the folder and open it with Unity3d to give it a try. It contains classes that will help you to start.

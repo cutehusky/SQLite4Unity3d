@@ -12,9 +12,7 @@ namespace SQLite4Unity3d.Example
         public float[] Floats1 { get; set; }
         public int[] Ints1 { get; set; }
         public bool[] Boolean1 { get; set; }
-        
         public Vector2[] Vec2s { get; set; }
-        
         public Vector3[] Vec3s { get; set; }
         // array to string
         [ToString]

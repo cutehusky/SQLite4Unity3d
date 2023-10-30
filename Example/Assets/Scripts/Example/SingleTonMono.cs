@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace SQLite4Unity3d
+namespace SQLite4Unity3d.Example
 {
     public class SingletonMono<T> : MonoBehaviour where T : SingletonMono<T>
     {

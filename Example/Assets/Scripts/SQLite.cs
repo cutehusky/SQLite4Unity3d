@@ -1961,17 +1961,17 @@ namespace SQLite4Unity3d
 			
 			public static readonly Dictionary<Type, Func<string, object>> WriteArrayFunction = new ()
 			{
-				[typeof(byte)] = (str) => str.Split(',')?.Select(byte.Parse).ToArray(),
-				[typeof(sbyte)] = (str) => str.Split(',')?.Select(sbyte.Parse).ToArray(),
-				[typeof(short)] = (str) => str.Split(',')?.Select(short.Parse).ToArray(),
-				[typeof(ushort)] = (str) => str.Split(',')?.Select(ushort.Parse).ToArray(),
-				[typeof(int)] = (str) => str.Split(',')?.Select(int.Parse).ToArray(),
-				[typeof(uint)] = (str) => str.Split(',')?.Select(uint.Parse).ToArray(),
-				[typeof(long)] = (str) => str.Split(',')?.Select(long.Parse).ToArray(),
-				[typeof(ulong)] = (str) => str.Split(',')?.Select(ulong.Parse).ToArray(),
-				[typeof(float)] = (str) => str.Split(',')?.Select(float.Parse).ToArray(),
-				[typeof(double)] = (str) => str.Split(',')?.Select(double.Parse).ToArray(),
-				[typeof(string)] = (str) => str.Split(StringSeparator)
+				[typeof(byte)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(byte.Parse).ToArray(),
+				[typeof(sbyte)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(sbyte.Parse).ToArray(),
+				[typeof(short)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(short.Parse).ToArray(),
+				[typeof(ushort)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(ushort.Parse).ToArray(),
+				[typeof(int)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(int.Parse).ToArray(),
+				[typeof(uint)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(uint.Parse).ToArray(),
+				[typeof(long)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(long.Parse).ToArray(),
+				[typeof(ulong)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(ulong.Parse).ToArray(),
+				[typeof(float)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(float.Parse).ToArray(),
+				[typeof(double)] = (str) => str.Split(',', StringSplitOptions.RemoveEmptyEntries)?.Select(double.Parse).ToArray(),
+				[typeof(string)] = (str) => str.Split(StringSeparator, StringSplitOptions.RemoveEmptyEntries)
 			};
 
 			private static string Array2String(object arr, Type T)
@@ -1982,11 +1982,9 @@ namespace SQLite4Unity3d
 			}
 			private static object String2Array(string str, Type T)
 			{
-				if (str.Length == 0) 
-					return null;
 				var t = T.GetElementType();
 				if (WriteArrayFunction.TryGetValue(t, out var func))
-					return func(str);
+					return func(str) ?? Array.CreateInstance(t, 0);
 				throw new NotSupportedException ("Don't know how to read: " + T);
 			}
 		}
@@ -2570,13 +2568,15 @@ namespace SQLite4Unity3d
 			}
 		}
 
-		private static byte[] ToByteArray<T>(T[] value, int size)
+		private static byte[] ToByteArray<T>(T[] array, int size)
 		{
-			if (value == null)
-				return Array.Empty<byte>();
-			var newValue = new byte[value.Length * size];
-			Buffer.BlockCopy(value, 0, newValue, 0, newValue.Length);
-			return newValue;
+			var byteArray = new byte[array.Length * size];
+				Buffer.BlockCopy(array, 0, byteArray, 0, byteArray.Length);
+			if (BitConverter.IsLittleEndian || size == 1)
+				return byteArray;
+			for (int i = 0; i < byteArray.Length; i+= size)
+				Array.Reverse(byteArray, i, size);
+			return byteArray;
 		} 
 
 		class Binding
@@ -2706,6 +2706,8 @@ namespace SQLite4Unity3d
 		object ReadCol (Sqlite3Statement stmt, int index, SQLite3.ColType type, Type clrType, bool isToString = false)
 		{
 			if (type == SQLite3.ColType.Null) {
+				if (clrType.IsArray)
+					return isToString ? "" : Array.CreateInstance(clrType.GetElementType(), 0);
 				return null;
 			} else {
 				if (isToString)
@@ -2729,11 +2731,18 @@ namespace SQLite4Unity3d
 			}
 		}
 		
-		private static T[] FromByteArray<T>(byte[] value, int size)
+		private static T[] FromByteArray<T>(byte[] byteArray, int size)
 		{
-			var newValue = new T[value.Length / size];
-			Buffer.BlockCopy(value, 0, newValue, 0,value.Length);
-			return newValue;
+			var array = new T[byteArray.Length / size];
+			if (BitConverter.IsLittleEndian || size == 1)
+			{
+				Buffer.BlockCopy(byteArray, 0, array, 0, byteArray.Length);
+				return array;
+			}
+			for (int i = 0; i < byteArray.Length; i+= size)
+				Array.Reverse(byteArray, i, size);
+			Buffer.BlockCopy(byteArray, 0, array, 0,byteArray.Length);
+			return array;
 		}
 	}
 	

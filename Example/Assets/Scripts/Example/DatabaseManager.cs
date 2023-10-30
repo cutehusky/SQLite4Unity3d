@@ -1,8 +1,6 @@
-﻿using SQLite4Unity3d;
-using SQLite4Unity3d.Example;
-using UnityEngine;
+﻿using UnityEngine;
 
-namespace SQLite4Unity3d
+namespace SQLite4Unity3d.Example
 {
 	public class DatabaseManager : SingletonMono<DatabaseManager>
 	{
